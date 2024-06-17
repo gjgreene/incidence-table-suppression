@@ -1,0 +1,85 @@
+echo "# incidence-table-suppression" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/gjgreene/incidence-table-suppression.git
+git push -u origin main
+
+import pandas as pd
+
+# Load the dataset
+file_path = 'incidence_dataset***.csv'
+df = pd.read_csv(file_path)
+
+# Rename columns for better readability
+df.columns = ['Diagnosis Stage', 'Site', 'Sex', 'WIMD', 'Age Category', 'Diagnosis Month', 'Diagnosis Year', 'Referral Type', 'Count']
+
+# Combine Stage I and Stage II into a new category 'Stage I/II'
+df['Diagnosis Stage'] = df['Diagnosis Stage'].replace({'Stage I': 'Stage I/II', 'Stage II': 'Stage I/II'})
+
+# Fill missing values for the 'Diagnosis Stage' with 'Unknown'
+df['Diagnosis Stage'].fillna('Unknown', inplace=True)
+
+# Create a pivot table to get counts by Diagnosis Year, Diagnosis Month, and Diagnosis Stage
+pivot_table = df.pivot_table(
+    index=['Diagnosis Year', 'Diagnosis Month', 'Diagnosis Stage'],
+    columns='Site',
+    values='Count',
+    aggfunc='sum',
+    fill_value=0
+)
+
+# Function to suppress small counts
+def suppress_small_counts(value, threshold=5):
+    if value <= threshold:
+        return "≤5"
+    return value
+
+# Apply suppression to the pivot table
+suppressed_table = pivot_table.applymap(lambda x: suppress_small_counts(x))
+
+# Calculate the column percentages
+# We'll calculate percentages on the original pivot table (non-suppressed data)
+pivot_table_percent = pivot_table.div(pivot_table.sum(axis=1), axis=0) * 100
+
+# Function to format counts and percentages
+def format_counts_and_percentages(count, percent):
+    if isinstance(count, str):  # If count is suppressed
+        return count
+    return f"{count} ({percent:.2f}%)"
+
+# Combine counts and percentages
+combined_table = pd.DataFrame()
+for col in pivot_table.columns:
+    combined_table[col] = [format_counts_and_percentages(c, p) for c, p in zip(suppressed_table[col], pivot_table_percent[col])]
+
+# Reset index for the final table
+combined_table = combined_table.reset_index()
+
+# Apply secondary suppression to prevent back-calculation
+def apply_secondary_suppression(table, threshold=5):
+    # Iterate over the DataFrame
+    for index, row in table.iterrows():
+        # Check if there's any suppressed value in the row
+        if any('≤5' in str(v) for v in row):
+            # Find the first unsuppressed value and suppress it
+            for col in table.columns:
+                if '≤5' not in str(row[col]):
+                    table.at[index, col] = '≤5'
+                    break
+    return table
+
+# Apply secondary suppression
+final_table = apply_secondary_suppression(combined_table)
+
+# Display the final table
+print(final_table)
+
+# Export the table to a CSV file for further use
+final_table.to_csv('suppressed_incidence_dataset.csv', index=False)
+    
+# Export the table to LaTeX format
+latex_table = final_table.to_latex(index=False)
+with open('suppressed_table.tex', 'w') as file:
+    file.write(latex_table)
